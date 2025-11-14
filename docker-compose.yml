@@ -3,116 +3,137 @@ services:
     build:
       context: ./frontv2
       dockerfile: Dockerfile
+    container_name: frontend
     ports:
       - "${FRONTEND_PORT}:3000"
-    environment:
-      - NODE_ENV=development
     networks:
       - backend
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://apigateway:5000
+    restart: unless-stopped
     develop:
       watch:
         - path: ./frontv2
           action: rebuild
 
+
   apigateway:
     build:
       context: ./ApiGateway
       dockerfile: Dockerfile
+    container_name: apigateway
     ports:
       - "${API_GATEWAY_PORT}:5000"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
       - Jwt__Secret=${JWT_SECRET}
-    depends_on:
-      - authservice
-      - minioservice
+    networks:
+      - backend
+    restart: unless-stopped
     develop:
       watch:
         - path: ./ApiGateway
           action: rebuild
-    networks:
-      - backend
+
 
   authservice:
     build:
       context: ./AuthService
       dockerfile: Dockerfile
+    container_name: authservice
     ports:
       - "${AUTHSERVICE_PORT}:5000"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
       - ConnectionStrings__DefaultConnection=${POSTGRES_CONNECTION_STRING}
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
       - Jwt__Secret=${JWT_SECRET}
+      - ADMIN__EMAIL=${ADMIN_EMAIL}
+      - ADMIN__PASSWORD=${ADMIN_PASSWORD}
     networks:
       - backend
     depends_on:
-      - authdb
+      authdb:
+        condition: service_started
+    restart: unless-stopped
     develop:
       watch:
         - path: ./AuthService
           action: rebuild
 
+
   authdb:
-    image: postgres:15
+    image: postgres:15-alpine
     container_name: authdb
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8
     ports:
       - "5432:5432"
     volumes:
       - authdb_data:/var/lib/postgresql/data
     networks:
       - backend
+    restart: unless-stopped
+
 
   minio:
     image: minio/minio:latest
     container_name: minio
     ports:
-      - "${MINIO_CONSOLE_PORT}:9002"
-      - "9001:${MINIO_API_PORT}"
+      - "${MINIO_CONSOLE_PORT}"
+      - "${MINIO_API_PORT}"
     networks:
       - backend
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_API_REQUEST_MAX_SIZE: "2147483648"
-    command: server /data
+    command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+    restart: unless-stopped
+
 
   minioservice:
     build:
       context: ./MinioService
       dockerfile: Dockerfile
+    container_name: minioservice
     ports:
       - "${MINIOSERVICE_PORT}:5000"
     networks:
       - backend
     environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-    depends_on:
-      - minio
+      - AUTH_SERVICE_URL=http://apigateway:5000/api/auth/me
+    restart: unless-stopped
     develop:
       watch:
         - path: ./MinioService
           action: rebuild
 
+
   ytdlpservice:
     build:
       context: ./YtDlpService
       dockerfile: Dockerfile
+    container_name: ytdlpservice
     ports:
       - "${YTDLPSERVICE_PORT}:80"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:80
       - YtDlp__ExecutablePath=yt-dlp
       - YtDlp__DownloadPath=/downloads
       - Jwt__Issuer=${JWT_ISSUER}
@@ -122,28 +143,32 @@ services:
       - ytdlp_downloads:/downloads
     networks:
       - backend
-    depends_on:
-      - minio
+    restart: unless-stopped
     develop:
       watch:
         - path: ./YtDlpService
           action: rebuild
 
+
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.48.0
     container_name: prometheus
     ports:
       - "9090:9090"
     volumes:
-      - ./loadtests/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./loadtests/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-remote-write-receiver"
     networks:
       - backend
-    depends_on:
-      - apigateway
+    restart: unless-stopped
+
 
   grafana:
     image: grafana/grafana:latest
@@ -151,39 +176,56 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./loadtests/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
-      - ./loadtests/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./loadtests/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./loadtests/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
     networks:
       - backend
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_started
+    restart: unless-stopped
+
 
   k6:
     image: grafana/k6:latest
     container_name: k6
     volumes:
-      - ./loadtests:/scripts
+      - ./loadtests:/scripts:ro
     environment:
-      - K6_VUS=50
-      - K6_DURATION=5m
-    command: run /scripts/test.js
+      - K6_VUS=${K6_VUS}
+      - K6_DURATION=${K6_DURATION}
+      - K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write
+      - K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max
+    command: run --out experimental-prometheus-rw /scripts/test.js
     networks:
       - backend
     depends_on:
-      - apigateway
-      - prometheus
+      prometheus:
+        condition: service_started
+      apigateway:
+        condition: service_started
+
 
 networks:
   backend:
     driver: bridge
+    name: yt_downloader_network
+
 
 volumes:
   authdb_data:
+    name: yt_authdb_data
   minio_data:
+    name: yt_minio_data
   ytdlp_downloads:
+    name: yt_downloads
   prometheus_data:
+    name: yt_prometheus_data
   grafana_data:
+    name: yt_grafana_data

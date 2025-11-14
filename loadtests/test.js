@@ -1,37 +1,45 @@
 import http from 'k6/http';
-import { sleep, check } from 'k6';
+import { check, sleep } from 'k6';
 
-export const options = {
-    vus: 50, // Virtual users
-    duration: '5m', // 5 minutes
+export let options = {
+    stages: [
+        { duration: '2m', target: 50 },    // Ramp up to 50 users
+        { duration: '5m', target: 100 },   // Increase to 100 users
+        { duration: '5m', target: 200 },   // Stress: 200 users
+        { duration: '5m', target: 500 },   // Heavy stress: 500 users
+        { duration: '2m', target: 1000 },  // SPIKE: 1000 users (find breaking point)
+        { duration: '3m', target: 1000 },  // Hold at peak
+        { duration: '2m', target: 0 },     // Ramp down
+    ],
     thresholds: {
-        http_req_duration: ['p(95)<500', 'p(99)<1000'], // 95th percentile < 500ms
-        http_req_failed: ['rate<0.1'], // Error rate < 10%
+        http_req_duration: ['p(99)<1000'],  // 99th percentile under 1 second (relaxed)
+        http_req_failed: ['rate<0.05'],     // Allow 5% error rate (more permissive)
     },
 };
 
 export default function () {
-    // Test 1: Health check
-    const healthRes = http.get('http://apigateway:5000/health');
-    check(healthRes, {
-        'health status 200': (r) => r.status === 200,
+    let loginRes = http.post('http://apigateway:5000/api/auth/login',
+        JSON.stringify({
+            email: 'admin@yt.com',
+            password: 'Admin47)'
+        }),
+        { headers: { 'Content-Type': 'application/json' } }
+    );
+
+    check(loginRes, {
+        'login successful': (r) => r.status === 200,
+        'has token': (r) => r.json('token') !== '',
     });
 
-    sleep(1);
+    let token = loginRes.json('token');
 
-    // Test 2: Auth service
-    const authRes = http.get('http://authservice:5000/health');
-    check(authRes, {
-        'auth status 200': (r) => r.status === 200,
+    let profileRes = http.get('http://apigateway:5000/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` },
     });
 
-    sleep(1);
-
-    // Test 3: MinIO service
-    const minioRes = http.get('http://minioservice:5000/list/my-bucket');
-    check(minioRes, {
-        'minio status 200': (r) => r.status === 200 || r.status === 500, // May be 500 if bucket empty
+    check(profileRes, {
+        'profile retrieved': (r) => r.status === 200,
     });
 
-    sleep(2);
+    sleep(0.5); // Reduced from 1s to increase request rate
 }

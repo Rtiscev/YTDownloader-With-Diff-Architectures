@@ -1,19 +1,20 @@
-using YtDlpService.Models;
-using YtDlpService.Services;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Net.Http.Headers;
+using YtDlpService.Models;
+using YtDlpService.DTOs;
+using YtDlpService.Services.Interfaces;
 
-namespace YtDlpService.Services;
+namespace YtDlpService.Services.Implementations;
 
-public class DownloadService
+public class DownloadService : IDownloadService
 {
-    private readonly YtDlpExecutor _ytDlpService;
+    private readonly IYtDlpExecutor _ytDlpService;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<DownloadService> _logger;
 
     public DownloadService(
-        YtDlpExecutor ytDlpService,
+        IYtDlpExecutor ytDlpService,
         IHttpClientFactory httpClientFactory,
         ILogger<DownloadService> logger)
     {
@@ -213,29 +214,6 @@ public class DownloadService
         }
     }
 
-    private static string SanitizeFilename(string filename) => new(filename.Where(c => c < 128).ToArray());
-}
-
-// DTOs
-public class CheckFileRequest
-{
-    public required string Url { get; set; }
-    public string? QualityLabel { get; set; }
-    public string? MediaType { get; set; }
-    public string? FileName { get; set; }
-}
-
-public class CheckFileResponse
-{
-    public bool Exists { get; set; }
-    public string? FileName { get; set; }
-    public string? DownloadUrl { get; set; }
-}
-
-public class DownloadAndUploadResponse
-{
-    public bool Success { get; set; }
-    public string FileName { get; set; } = string.Empty;
-    public string DownloadUrl { get; set; } = string.Empty;
-    public string Message { get; set; } = string.Empty;
+    private static string SanitizeFilename(string filename) =>
+        new(filename.Where(c => c < 128).ToArray());
 }

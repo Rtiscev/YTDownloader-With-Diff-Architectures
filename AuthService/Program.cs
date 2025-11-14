@@ -40,7 +40,7 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// Add services
+// Register services
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAuthService, AuthenticationService>();
 builder.Services.AddControllers();
@@ -68,58 +68,60 @@ app.MapControllers();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    db.Database.EnsureCreated();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-
-    // Create roles
-    foreach (var role in new[] { "Admin", "User", "Guest" })
+    try
     {
-        if (!await roleManager.RoleExistsAsync(role))
+        db.Database.EnsureCreated();
+
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+
+        // Create roles
+        foreach (var role in new[] { "Admin", "User", "Guest" })
         {
-            await roleManager.CreateAsync(new IdentityRole(role));
-            Console.WriteLine($"✓ Role '{role}' created");
+            if (!await roleManager.RoleExistsAsync(role))
+            {
+                await roleManager.CreateAsync(new IdentityRole(role));
+            }
+        }
+
+        // Get admin credentials from environment variables
+        string adminEmail = builder.Configuration["Admin:Email"];
+
+        string adminPassword = builder.Configuration["Admin:Password"];
+
+        // Create default admin user
+        var adminUser = await userManager.FindByEmailAsync(adminEmail);
+        if (adminUser == null)
+        {
+            adminUser = new ApplicationUser
+            {
+                UserName = adminEmail,
+                Email = adminEmail,
+                FirstName = "System",
+                LastName = "Admin",
+                EmailConfirmed = true,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var result = await userManager.CreateAsync(adminUser, adminPassword);
+            if (result.Succeeded)
+            {
+                await userManager.AddToRoleAsync(adminUser, "Admin");
+                logger.LogInformation("Admin user created: {Email}", adminEmail);
+            }
+            else
+            {
+                logger.LogError("Failed to create admin user: {Errors}",
+                    string.Join(", ", result.Errors.Select(e => e.Description)));
+            }
         }
     }
-
-    // Create default admin user
-    const string adminEmail = "admin@yt.com";
-    const string adminPassword = "Admin47)";
-
-    var adminUser = await userManager.FindByEmailAsync(adminEmail);
-    if (adminUser == null)
+    catch (Exception ex)
     {
-        adminUser = new ApplicationUser
-        {
-            UserName = adminEmail,
-            Email = adminEmail,
-            FirstName = "System",
-            LastName = "Admin",
-            EmailConfirmed = true,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        var result = await userManager.CreateAsync(adminUser, adminPassword);
-        if (result.Succeeded)
-        {
-            await userManager.AddToRoleAsync(adminUser, "Admin");
-            Console.WriteLine("✓ Admin user created successfully");
-            Console.WriteLine($"  Email: {adminEmail}");
-            Console.WriteLine($"  Password: {adminPassword}");
-            Console.WriteLine("  ⚠️  CHANGE THIS PASSWORD IN PRODUCTION!");
-        }
-        else
-        {
-            Console.WriteLine("✗ Failed to create admin user:");
-            foreach (var error in result.Errors)
-                Console.WriteLine($"  - {error.Description}");
-        }
-    }
-    else
-    {
-        Console.WriteLine($"✓ Admin user already exists: {adminEmail}");
+        logger.LogError(ex, "Error during database seeding");
     }
 }
 
