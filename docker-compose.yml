@@ -135,45 +135,33 @@ services:
         - path: ./YtDlpService
           action: rebuild
 
-  prometheus:
-    image: prom/prometheus:v2.48.0
-    container_name: prometheus
+  beszel:
+    image: henrygd/beszel:latest
+    container_name: beszel
     ports:
-      - "9090:9090"
+      - "8090:8090"
     volumes:
-      - ./loadtests/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=30d"
-      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
-      - "--web.console.templates=/usr/share/prometheus/consoles"
-      - "--web.enable-remote-write-receiver"
+      - beszel_data:/beszel_data
     networks:
       - backend
     restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    ports:
-      - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
-      - GF_SERVER_ROOT_URL=http://localhost:3001
-      - GF_INSTALL_PLUGINS=grafana-piechart-panel
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./loadtests/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
-      - ./loadtests/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
-    networks:
-      - backend
-    depends_on:
-      prometheus:
-        condition: service_started
+      - PUID=1000
+      - PGID=1000
+
+  beszel-agent:
+    image: henrygd/beszel-agent:latest
+    container_name: beszel-agent
+    network_mode: host
     restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./beszel_agent_data:/var/lib/beszel-agent
+    environment:
+      LISTEN: 45876
+      KEY: ${KEY}
+      TOKEN: ${TOKEN}
+      HUB_URL: http://localhost:8090
 
   k6:
     image: grafana/k6:latest
@@ -182,17 +170,15 @@ services:
       - testing
     volumes:
       - ./loadtests:/scripts:ro
+      - ./loadtests/results:/results
     environment:
       - K6_VUS=${K6_VUS}
       - K6_DURATION=${K6_DURATION}
-      - K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write
-      - K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max
-    command: run --out experimental-prometheus-rw /scripts/test.js
+    command: run --out json=/results/k6-results.json /scripts/test.js
     networks:
       - backend
+    restart: "no"
     depends_on:
-      prometheus:
-        condition: service_started
       apigateway:
         condition: service_started
 
@@ -212,3 +198,7 @@ volumes:
     name: yt_prometheus_data
   grafana_data:
     name: yt_grafana_data
+  beszel_data:
+    name: yt_beszel_data
+  beszel_agent_data:
+    name: yt_beszel_agent_data
