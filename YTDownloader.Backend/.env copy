@@ -1,0 +1,29 @@
+# Service Ports
+FRONTEND_PORT=3000
+API_GATEWAY_PORT=9500
+AUTHSERVICE_PORT=5000
+MINIOSERVICE_PORT=7000
+YTDLPSERVICE_PORT=5003
+
+# PostgreSQL
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=authdb
+POSTGRES_CONNECTION_STRING=Server=localhost;Port=5432;Database=youtube_down_auth;User Id=postgres;Password=postgres;
+
+# MinIO
+MINIO_USER=minioadmin
+MINIO_PASSWORD=minioadmin
+MINIO_CONSOLE_PORT=9002
+MINIO_API_PORT=9000
+Minio_Endpoint=localhost:9000
+Minio_BucketName=my-bucket
+
+# JWT
+JWT_ISSUER=yt_downloader
+JWT_AUDIENCE=sample_users
+JWT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Admin
+ADMIN_EMAIL=admin@yt.com
+ADMIN_PASSWORD=Admin47)
